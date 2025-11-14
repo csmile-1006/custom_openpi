@@ -20,6 +20,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.robocasa_policy as robocasa_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -95,6 +96,10 @@ class DataConfig:
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
     # Path to the data filter file for DROID dataset
     filter_dict_path: str | None = None
+
+    local_files_only: bool = False
+
+    cache_dir: str | None = None
 
 
 class GroupFactory(Protocol):
@@ -413,6 +418,63 @@ class RLDSDroidDataConfig(DataConfigFactory):
             filter_dict_path=self.filter_dict_path,
         )
 
+@dataclasses.dataclass(frozen=True)
+class LeRobotRobocasaDataConfig(DataConfigFactory):
+    """
+    This config is used to configure transforms that are applied at various parts of the data pipeline.
+    For your own dataset, you can copy this class and modify the transforms to match your dataset based on the
+    comments below.
+    """
+
+    offline_sampling: bool = False
+    dpo_training: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # The repack transform is *only* applied to the data coming from the dataset,
+        # and *not* during inference. We can use it to make inputs from the dataset look
+        # as close as possible to those coming from the inference environment (e.g. match the keys).
+        # Below, we match the keys in the dataset (which we defined in the data conversion script) to
+        # the keys we use in our inference pipeline (defined in the inference script for libero).
+        # For your own dataset, first figure out what keys your environment passes to the policy server
+        # and then modify the mappings below so your dataset's keys get matched to those target keys.
+        # The repack transform simply remaps key names here.
+
+        # new_key : old_key 순
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "video.left_view": "observation.images.left_view",
+                        "video.right_view": "observation.images.right_view",
+                        "video.wrist_view": "observation.images.wrist_view",
+                        "state": "observation.state",
+                        "action": "action",
+                        "annotation.human.action.task_description": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[
+                robocasa_policy.RobocasaInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)
+            ],
+            outputs=[robocasa_policy.RobocasaOutputs()],
+        )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            # NOTE : pi0-fast uses quantile norm (official paper) -> similar to min-max
+            use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
+            # NOTE : Lerobot Robocasa dataset has "action" key, not actions!
+            action_sequence_keys=("action",),
+        )
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotDROIDDataConfig(DataConfigFactory):
@@ -458,7 +520,7 @@ class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
     name: tyro.conf.Suppress[str]
     # Project name.
-    project_name: str = "openpi"
+    project_name: str = "Robocasa-openpi"
     # Experiment name. Will be used to name the metadata and checkpoint directories.
     exp_name: str = tyro.MISSING
 
@@ -489,7 +551,7 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "./checkpoints"
+    checkpoint_base_dir: str = "/virtual_lab/sjw_alinlab/taeyoung/workspace/ckpt/openpi_correct_decay"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -497,7 +559,7 @@ class TrainConfig:
     batch_size: int = 32
     # Number of workers to use for the data loader. Increasing this number will speed up data loading but
     # will increase memory and CPU usage.
-    num_workers: int = 2
+    num_workers: int = 32
     # Number of train steps (batches) to run.
     num_train_steps: int = 30_000
 
@@ -610,20 +672,6 @@ _CONFIGS = [
             assets=AssetsConfig(asset_id="droid"),
             data_transforms=lambda model: _transforms.Group(
                 inputs=[droid_policy.DroidInputs(model_type=ModelType.PI0_FAST)],
-                outputs=[droid_policy.DroidOutputs()],
-            ),
-            base_config=DataConfig(
-                prompt_from_task=True,
-            ),
-        ),
-    ),
-    TrainConfig(
-        name="pi05_droid",
-        model=pi0_config.Pi0Config(action_horizon=15, pi05=True),
-        data=SimpleDataConfig(
-            assets=AssetsConfig(asset_id="droid"),
-            data_transforms=lambda model: _transforms.Group(
-                inputs=[droid_policy.DroidInputs(model_type=ModelType.PI05)],
                 outputs=[droid_policy.DroidOutputs()],
             ),
             base_config=DataConfig(
@@ -960,6 +1008,135 @@ _CONFIGS = [
     # RoboArena configs.
     #
     *roboarena_config.get_roboarena_configs(),
+    #
+    # Robocasa configs
+    #
+    TrainConfig(
+        name="pi0_fast_robocasa_30demos_base",
+        model=pi0_fast.Pi0FASTConfig(action_dim=12, action_horizon=16, max_token_len=180),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_30",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_30demos",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_30",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_fast_robocasa_100demos_base",
+        model=pi0_fast.Pi0FASTConfig(action_dim=12, action_horizon=16, max_token_len=180),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_100",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_100demos",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_100",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_fast_robocasa_300demos_base",
+        model=pi0_fast.Pi0FASTConfig(action_dim=12, action_horizon=16, max_token_len=180),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_300",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_300demos",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_300",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_robocasa_30demos_base",
+        model=pi0_config.Pi0Config(),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_30",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_30demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_30",
+            ),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=60_000,
+            decay_lr=2.5e-6,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=60_000,
+    ),
+    TrainConfig(
+        name="pi0_robocasa_100demos_base",
+        model=pi0_config.Pi0Config(),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_100",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_100demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_100",
+            ),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=60_000,
+            decay_lr=2.5e-6,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=60_000,
+    ),
+    TrainConfig(
+        name="pi0_robocasa_300demos_base",
+        model=pi0_config.Pi0Config(),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_300",
+            assets=AssetsConfig(
+                assets_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/assets",
+                asset_id="robocasa_lerobot_300demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+                cache_dir="/virtual_lab/sjw_alinlab/taeyoung/workspace/data/huggingface/lerobot/kimtaey/robocasa_mg_gr00t_300",
+            ),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=60_000,
+            decay_lr=2.5e-6,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=60_000,
+    ),
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):

@@ -1,9 +1,10 @@
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from typing_extensions import override
+import websockets.exceptions
 import websockets.sync.client
+from typing_extensions import override
 
 from openpi_client import base_policy as _base_policy
 from openpi_client import msgpack_numpy
@@ -25,6 +26,16 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
         self._packer = msgpack_numpy.Packer()
         self._api_key = api_key
         self._ws, self._server_metadata = self._wait_for_server()
+
+        # available_policies 정보 저장
+        self._available_policies = self._server_metadata.get("available_policies", [])
+        self._action_horizon = self._server_metadata.get("action_horizon", 16)
+
+    def get_available_policies(self) -> List[str]:
+        return self._available_policies
+
+    def get_action_horizon(self) -> int:
+        return self._action_horizon
 
     def get_server_metadata(self) -> Dict:
         return self._server_metadata
