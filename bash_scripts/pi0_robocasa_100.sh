@@ -26,7 +26,11 @@ POLICY_DIRS=(
 )
 
 RANDOM_PORT=39281
-TASK_ID=$1
+SEEDS=(
+  "0"
+  "42"
+  "123"
+)
 
 TASK_NAMES=(
 #   "TurnSinkSpout"
@@ -55,23 +59,26 @@ TASK_NAMES=(
 #   "CloseDoubleDoor" # 23
 ) # 24 tasks in total
 
-TASK_NAME="${TASK_NAMES[$TASK_ID]}"
-OUTPUT_DIR="$BASE_DIR/output/openpi/robocasa_100/$CONFIG_NAME/checkpoint-$CKPT_STEP/$TASK_NAME-seed42"
-mkdir -p "$OUTPUT_DIR"
+for TASK_ID in "${!TASK_NAMES[@]}"; do
+  for SEED_ID in "${!SEEDS[@]}"; do
+    TASK_NAME="${TASK_NAMES[$TASK_ID]}"
+    SEED=${SEEDS[$SEED_ID]}
+    OUTPUT_DIR="$BASE_DIR/output/openpi/robocasa_100/$CONFIG_NAME/checkpoint-$CKPT_STEP/$TASK_NAME-seed$SEED"
+    mkdir -p "$OUTPUT_DIR"
 
-echo "POLICY : ${POLICY_DIRS[@]}  | TASK_NAME: ${TASK_NAME} | PORT: ${RANDOM_PORT}"
+    echo "POLICY : ${POLICY_DIRS[@]}  | TASK_NAME: ${TASK_NAME} | SEED: ${SEED} | PORT: ${RANDOM_PORT}"
 
+    EVAL_CMD="python $BASE_DIR/openpi/examples/robocasa/scripts/robocasa_eval.py \
+        --args.port=$RANDOM_PORT \
+        --args.seed=$SEED \
+        --args.env_name \"$TASK_NAME\" \
+        --args.video-dir \"$OUTPUT_DIR\" \
+        --args.n-episodes=50 \
+        --args.generative_textures"
 
-EVAL_CMD="python $BASE_DIR/openpi/examples/robocasa/scripts/robocasa_eval.py \
-    --args.port=$RANDOM_PORT \
-    --args.seed=42 \
-    --args.env_name \"$TASK_NAME\" \
-    --args.video-dir \"$OUTPUT_DIR\" \
-    --args.n-episodes=50 \
-    --args.generative_textures"
-
-
-echo "Starting evaluation with command:"
-echo "$EVAL_CMD"
-eval $EVAL_CMD
+    echo "Starting evaluation with command:"
+    echo "$EVAL_CMD"
+    eval $EVAL_CMD
+    done
+done
  
