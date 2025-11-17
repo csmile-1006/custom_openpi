@@ -67,6 +67,8 @@ class RobocasaInputs(transforms.DataTransformFn):
             "state": state,
             "image": dict(zip(names, images, strict=True)),
             "image_mask": dict(zip(names, image_masks, strict=True)),
+            "reward": data["reward"],
+            "done": data["done"],
         }
         
         if "annotation.human.action.task_description" in data:
