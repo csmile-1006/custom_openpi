@@ -87,6 +87,12 @@ class DataConfig:
     # LeRobot dataset is using different keys to represent the action.
     action_sequence_keys: Sequence[str] = ("actions",)
 
+    # Names of keys that will be used by the data loader to generate the observation sequence. The length of the
+    # sequence is (obs, next_obs) for doing RL training. This should be adjusted if your
+    # LeRobot dataset is using different keys to represent the observation. If None, will use the default keys.
+    use_next_observation: bool = False
+    observation_keys: Sequence[str] = "state"
+
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
 
@@ -128,6 +134,19 @@ class ModelTransformFactory(GroupFactory):
                     ],
                 )
             case _model.ModelType.PI05:
+                assert isinstance(model_config, pi0_config.Pi0Config)
+                return _transforms.Group(
+                    inputs=[
+                        _transforms.InjectDefaultPrompt(self.default_prompt),
+                        _transforms.ResizeImages(224, 224),
+                        _transforms.TokenizePrompt(
+                            _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
+                            discrete_state_input=model_config.discrete_state_input,
+                        ),
+                        _transforms.PadStatesAndActions(model_config.action_dim),
+                    ],
+                )
+            case _model.ModelType.PI05_DEAS:
                 assert isinstance(model_config, pi0_config.Pi0Config)
                 return _transforms.Group(
                     inputs=[
@@ -451,8 +470,6 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
                         "state": "observation.state",
                         "action": "action",
                         "annotation.human.action.task_description": "prompt",
-                        # "reward": "next.reward",
-                        # "done": "next.done",
                     }
                 )
             ]
@@ -475,9 +492,72 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
             # NOTE : pi0-fast uses quantile norm (official paper) -> similar to min-max
             use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
             # NOTE : Lerobot Robocasa dataset has "action" key, not actions!
-            # action_sequence_keys=("action", "next.reward", "next.done"),
             action_sequence_keys=("action",),
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotRobocasaRLDataConfig(DataConfigFactory):
+    """
+    This config is used to configure transforms that are applied at various parts of the data pipeline.
+    For your own dataset, you can copy this class and modify the transforms to match your dataset based on the
+    comments below.
+    """
+
+    offline_sampling: bool = False
+    dpo_training: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # The repack transform is *only* applied to the data coming from the dataset,
+        # and *not* during inference. We can use it to make inputs from the dataset look
+        # as close as possible to those coming from the inference environment (e.g. match the keys).
+        # Below, we match the keys in the dataset (which we defined in the data conversion script) to
+        # the keys we use in our inference pipeline (defined in the inference script for libero).
+        # For your own dataset, first figure out what keys your environment passes to the policy server
+        # and then modify the mappings below so your dataset's keys get matched to those target keys.
+        # The repack transform simply remaps key names here.
+
+        # new_key : old_key 순
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "video.left_view": "observation.images.left_view",
+                        "video.right_view": "observation.images.right_view",
+                        "video.wrist_view": "observation.images.wrist_view",
+                        "state": "observation.state",
+                        "action": "action",
+                        "annotation.human.action.task_description": "prompt",
+                        "reward": "next.reward",
+                        "done": "next.done",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[
+                robocasa_policy.RobocasaRLInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)
+            ],
+            outputs=[robocasa_policy.RobocasaOutputs()],
+        )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            # NOTE : pi0-fast uses quantile norm (official paper) -> similar to min-max
+            use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
+            use_next_observation=True,
+            observation_keys=("video.left_view", "video.right_view", "video.wrist_view", "state"),
+            # NOTE : Lerobot Robocasa dataset has "action" key, not actions!
+            action_sequence_keys=("action", "next.reward", "next.done"),
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotDROIDDataConfig(DataConfigFactory):
@@ -1138,7 +1218,8 @@ _CONFIGS = [
         ),
         num_train_steps=30_000,
         pytorch_weight_path="/home/changyeon/ckpts/changyeon/pi05_pytorch/",
-        batch_size=64,
+        batch_size=32,
+        save_interval=10000,
     ),
     TrainConfig(
         name="pi0_robocasa_100demos_base_filtered_bc",

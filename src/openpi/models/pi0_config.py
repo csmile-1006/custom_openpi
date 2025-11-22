@@ -45,6 +45,8 @@ class Pi0Config(_model.BaseModelConfig):
     @override
     def model_type(self) -> _model.ModelType:
         if self.pi05:
+            if self.deas:
+                return _model.ModelType.PI05_DEAS
             return _model.ModelType.PI05
         return _model.ModelType.PI0
 
