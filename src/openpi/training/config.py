@@ -451,8 +451,8 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
                         "state": "observation.state",
                         "action": "action",
                         "annotation.human.action.task_description": "prompt",
-                        "reward": "next.reward",
-                        "done": "next.done",
+                        # "reward": "next.reward",
+                        # "done": "next.done",
                     }
                 )
             ]
@@ -475,7 +475,8 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
             # NOTE : pi0-fast uses quantile norm (official paper) -> similar to min-max
             use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
             # NOTE : Lerobot Robocasa dataset has "action" key, not actions!
-            action_sequence_keys=("action", "next.reward", "next.done"),
+            # action_sequence_keys=("action", "next.reward", "next.done"),
+            action_sequence_keys=("action",),
         )
 
 @dataclasses.dataclass(frozen=True)
@@ -553,7 +554,7 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "/home/changyeon/workspace/ckpts"
+    checkpoint_base_dir: str = "/home/changyeon/ckpts/pi05"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -1114,6 +1115,30 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=60_000,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_100demos_base",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="kimtaey/robocasa_mg_gr00t_100",
+            assets=AssetsConfig(
+                assets_dir="/home/changyeon/data/assets",
+                asset_id="robocasa_lerobot_100demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+            ),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=5e-5,
+            decay_steps=30_000,
+            decay_lr=5e-5,
+        ),
+        num_train_steps=30_000,
+        pytorch_weight_path="/home/changyeon/ckpts/changyeon/pi05_pytorch/",
+        batch_size=64,
     ),
     TrainConfig(
         name="pi0_robocasa_100demos_base_filtered_bc",

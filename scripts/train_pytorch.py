@@ -443,9 +443,29 @@ def train_loop(config: _config.TrainConfig):
         logging.info(f"Loading weights from: {config.pytorch_weight_path}")
 
         model_path = os.path.join(config.pytorch_weight_path, "model.safetensors")
-        safetensors.torch.load_model(
-            (model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model), model_path
-        )
+
+        # DDP unwrap
+        model_to_load = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
+
+        # safetensors → dict 로 읽기
+        ckpt_state = safetensors.torch.load_file(model_path, device="cpu")
+        model_state = model_to_load.state_dict()
+
+        # 모델에 존재하는 키만 필터링
+        filtered_state = {k: v for k, v in ckpt_state.items() if k in model_state}
+
+        missing_keys = [k for k in model_state if k not in ckpt_state]
+        unexpected_keys = [k for k in ckpt_state if k not in model_state]
+
+        if missing_keys:
+            logging.warning(f"{len(missing_keys)} missing keys in checkpoint (kept model init weights): {missing_keys}")
+        if unexpected_keys:
+            logging.warning(f"{len(unexpected_keys)} unexpected keys in checkpoint (ignored): {unexpected_keys}")
+
+        # 부분 로딩(strict=False)
+        model_to_load.load_state_dict(filtered_state, strict=False)
+
+        del ckpt_state, filtered_state
         logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
 
     # Optimizer + learning rate schedule from config

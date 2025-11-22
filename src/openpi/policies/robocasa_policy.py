@@ -23,17 +23,17 @@ class RobocasaInputs(transforms.DataTransformFn):
 
     # Determines which model will be used.
     model_type: _model.ModelType = _model.ModelType.PI0
-    
+
     offline_sampling: bool = False
 
     def __call__(self, data: dict) -> dict:
         # state : torch.Size([53]) -> [16] = (D)
         state_base_pos = data["state"][:3]
-        state_base_rot = data["state"][3:7] #quaternion
+        state_base_rot = data["state"][3:7]  # quaternion
         state_end_eff_pos_rel = data["state"][10:13]
-        state_end_eff_rot_rel = data["state"][17:21] #quaternion
+        state_end_eff_rot_rel = data["state"][17:21]  # quaternion
         state_gripper_qpos = data["state"][21:23]
-        
+
         state = np.concatenate([state_base_pos, state_base_rot, state_end_eff_pos_rel, state_end_eff_rot_rel, state_gripper_qpos])
          # since the robocasa action_dim = 12, which is < state_dim = 16, so pad is skipped.
         state = transforms.pad_to_dim(state, self.action_dim)
@@ -50,12 +50,12 @@ class RobocasaInputs(transforms.DataTransformFn):
                 names = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
                 images = (left_image, right_image, wrist_image)
                 image_masks = (np.True_, np.True_, np.True_)
-            case _model.ModelType.PI0_FAST:
-                names = ("base_0_rgb", "base_1_rgb", "wrist_0_rgb")
-                # We don't mask out padding images for FAST models.
+            case _model.ModelType.PI05:
+                # NOTE : ordered from left arm to right arm
+                names = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
                 images = (left_image, right_image, wrist_image)
                 image_masks = (np.True_, np.True_, np.True_)
-            case _model.ModelType.PI0_FAST_RSCL:
+            case _model.ModelType.PI0_FAST:
                 names = ("base_0_rgb", "base_1_rgb", "wrist_0_rgb")
                 # We don't mask out padding images for FAST models.
                 images = (left_image, right_image, wrist_image)
@@ -67,13 +67,16 @@ class RobocasaInputs(transforms.DataTransformFn):
             "state": state,
             "image": dict(zip(names, images, strict=True)),
             "image_mask": dict(zip(names, image_masks, strict=True)),
-            "reward": data["reward"],
-            "done": data["done"],
         }
-        
+
         if "annotation.human.action.task_description" in data:
             inputs["prompt"] = data["annotation.human.action.task_description"]
-        
+
+        if "reward" in data:
+            inputs["reward"] = data["reward"]
+        if "done" in data:
+            inputs["done"] = data["done"]
+
         if "action" in data: #SFT Data
             # action : torch.Size([16, 12]) = (H, D)
             action_base_motion = data["action"][:,:4]
@@ -81,7 +84,7 @@ class RobocasaInputs(transforms.DataTransformFn):
             action_end_eff_pos = data["action"][:,5:8]
             action_end_eff_rot = data["action"][:,8:11] #axis angle
             action_gripper_close = data["action"][:,11:12] #binary
-            
+
             inputs["actions"] = np.concatenate([action_base_motion, action_control_mode, action_end_eff_pos, action_end_eff_rot, action_gripper_close], axis=1)
 
         return inputs
