@@ -29,7 +29,7 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
 
         # available_policies 정보 저장
         self._available_policies = self._server_metadata.get("available_policies", [])
-        self._action_horizon = self._server_metadata.get("action_horizon", 16)
+        self._action_horizon = self._server_metadata.get("action_horizon", 50)
 
     def get_available_policies(self) -> List[str]:
         return self._available_policies

@@ -1222,6 +1222,31 @@ _CONFIGS = [
         save_interval=10000,
     ),
     TrainConfig(
+        name="pi05_robocasa_100demos_filtered_bc",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotRobocasaDataConfig(
+            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
+            assets=AssetsConfig(
+                assets_dir="/home/changyeon/data/assets",
+                asset_id="robocasa_lerobot_100demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+            ),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=5e-5,
+            decay_steps=30_000,
+            decay_lr=5e-5,
+        ),
+        num_train_steps=30_000,
+        pytorch_weight_path="/home/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_pytorch/30000",
+        batch_size=32,
+        save_interval=10000,
+    ),
+    TrainConfig(
         name="pi0_robocasa_100demos_base_filtered_bc",
         model=pi0_config.Pi0Config(),
         data=LeRobotRobocasaDataConfig(

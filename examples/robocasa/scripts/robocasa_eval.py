@@ -29,9 +29,12 @@ from tqdm import trange
 import tyro
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-sys.path.insert(0, "/home/changyeon/workspace/openpi/examples/robocasa/gr00t")
-sys.path.insert(0, "/home/changyeon/workspace/openpi/packages/openpi-client/src/")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+gr00t_path = os.path.join(current_dir, "..", "gr00t")
+openpi_client_path = os.path.join(current_dir, "..", "..", "..", "packages", "openpi-client", "src")
 
+sys.path.insert(0, os.path.abspath(gr00t_path))
+sys.path.insert(0, os.path.abspath(openpi_client_path))
 from gr00t.eval.wrappers.multistep_wrapper import MultiStepWrapper
 from gr00t.eval.wrappers.record_video import RecordVideo
 from gr00t.eval.wrappers.robocasa_wrapper import RoboCasaWrapper

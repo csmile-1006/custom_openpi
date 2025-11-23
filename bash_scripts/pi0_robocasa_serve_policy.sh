@@ -13,9 +13,9 @@ unset LEROBOT_HOME
 
 
 
-CKPT_PATH="/home/changyeon/ckpts/pi05"
+CKPT_PATH="/home/changyeon/ckpts"
 CONFIG_NAME="pi05_robocasa_100demos_base"
-EXP_NAME="pi05_robocasa_as50"
+EXP_NAME="pi05_robocasa_as50_pytorch"
 
 POLICY_SEED=42
 CKPT_STEP=30000
