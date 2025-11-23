@@ -68,7 +68,7 @@ for TASK_ID in "${!TASK_NAMES[@]}"; do
 
     echo "POLICY : ${POLICY_DIRS[@]}  | TASK_NAME: ${TASK_NAME} | SEED: ${SEED} | PORT: ${RANDOM_PORT}"
 
-    EVAL_CMD="python $BASE_DIR/openpi/examples/robocasa/scripts/robocasa_eval.py \
+    EVAL_CMD="python $BASE_DIR/custom_openpi/examples/robocasa/scripts/robocasa_eval.py \
         --args.port=$RANDOM_PORT \
         --args.seed=$SEED \
         --args.env_name \"$TASK_NAME\" \
