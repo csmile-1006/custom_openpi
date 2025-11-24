@@ -125,10 +125,11 @@ def eval_robocasa(args: Args) -> None:
 
     # Load Model from Server
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
-    available_policies = client.get_available_policies()
-    action_horizon = client.get_action_horizon()
-    logging.info(f"Available policies: {available_policies}")
-    logging.info(f"Action horizon: {action_horizon}")
+    action_horizon = 16
+    # available_policies = client.get_available_policies()
+    # action_horizon = client.get_action_horizon()
+    # logging.info(f"Available policies: {available_policies}")
+    # logging.info(f"Action horizon: {action_horizon}")
 
     # ROBOCASA ENV SETUP
     controller_config = load_composite_controller_config(

@@ -17,7 +17,7 @@ CKPT_PATH="/home/changyeon/ckpts/"
 CONFIG_NAME="pi0_robocasa_100demos_base"
 
 POLICY_SEED=42
-CKPT_STEP=59999
+CKPT_STEP=30000
 
 DEBUG=0   # 1 to return top-10 dists per step
 
@@ -68,7 +68,7 @@ for TASK_ID in "${!TASK_NAMES[@]}"; do
 
     echo "POLICY : ${POLICY_DIRS[@]}  | TASK_NAME: ${TASK_NAME} | SEED: ${SEED} | PORT: ${RANDOM_PORT}"
 
-    EVAL_CMD="python $BASE_DIR/custom_openpi/examples/robocasa/scripts/robocasa_eval.py \
+    EVAL_CMD="MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=0 CUDA_VISIBLE_DEVICES=0 python $BASE_DIR/custom_openpi/examples/robocasa/scripts/robocasa_eval.py \
         --args.port=$RANDOM_PORT \
         --args.seed=$SEED \
         --args.env_name \"$TASK_NAME\" \
