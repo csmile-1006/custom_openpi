@@ -634,7 +634,7 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "/home/changyeon/ckpts/pi05"
+    checkpoint_base_dir: str = "/home/changyeon/ckpts"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -1217,7 +1217,7 @@ _CONFIGS = [
             decay_lr=5e-5,
         ),
         num_train_steps=30_000,
-        pytorch_weight_path="/home/changyeon/ckpts/changyeon/pi05_pytorch/",
+        # pytorch_weight_path="/home/changyeon/ckpts/changyeon/pi05_pytorch/",
         batch_size=32,
         save_interval=10000,
     ),
@@ -1245,32 +1245,6 @@ _CONFIGS = [
         pytorch_weight_path="/home/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_pytorch/30000",
         batch_size=32,
         save_interval=10000,
-    ),
-    TrainConfig(
-        name="pi0_robocasa_100demos_base_filtered_bc",
-        model=pi0_config.Pi0Config(),
-        data=LeRobotRobocasaDataConfig(
-            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
-            assets=AssetsConfig(
-                assets_dir="/home/changyeon/data/assets/",
-                asset_id="robocasa_lerobot_100demos_pi0",
-            ),
-            base_config=DataConfig(
-                local_files_only=True,
-                prompt_from_task=True,
-                cache_dir="/home/changyeon/data/deas_robocasa_demo_success_rollouts",
-            ),
-        ),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000,
-            peak_lr=2.5e-5,
-            decay_steps=30_000,
-            decay_lr=2.5e-6,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/home/changyeon/ckpts/pytorch_checkpoints/pi0_robocasa_100demos_base"
-        ),
-        num_train_steps=30_000,
     ),
     TrainConfig(
         name="pi0_robocasa_300demos_base",

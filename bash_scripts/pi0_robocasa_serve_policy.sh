@@ -15,7 +15,7 @@ unset LEROBOT_HOME
 
 CKPT_PATH="/home/changyeon/ckpts"
 CONFIG_NAME="pi05_robocasa_100demos_base"
-EXP_NAME="pi05_robocasa_as50_pytorch"
+EXP_NAME="pi05_robocasa_as50_jax"
 
 POLICY_SEED=42
 CKPT_STEP=30000
@@ -23,7 +23,7 @@ CKPT_STEP=30000
 DEBUG=0   # 1 to return top-10 dists per step
 
 POLICY_DIRS=(
-    "$CKPT_PATH/$CONFIG_NAME/$EXP_NAME/$CKPT_STEP"
+    # "$CKPT_PATH/$CONFIG_NAME/$EXP_NAME/$CKPT_STEP"
 )
 
 RANDOM_PORT=39281
