@@ -634,7 +634,7 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "/home/changyeon/ckpts"
+    checkpoint_base_dir: str = "/home/ubuntu/data/changyeon/ckpts"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -1242,7 +1242,10 @@ _CONFIGS = [
             decay_lr=5e-5,
         ),
         num_train_steps=30_000,
-        pytorch_weight_path="/home/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_pytorch/30000",
+        # pytorch_weight_path="/home/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_pytorch/30000",
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/home/ubuntu/data/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_jax/29999/params"
+        ),
         batch_size=32,
         save_interval=10000,
     ),
