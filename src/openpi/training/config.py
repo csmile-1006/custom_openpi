@@ -1249,7 +1249,7 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi0_robocasa_100demos_filtered_bc",
-        model=pi0_config.Pi0Config(pi05=True),
+        model=pi0_config.Pi0Config(),
         data=LeRobotRobocasaDataConfig(
             repo_id="changyeon/deas_robocasa_demo_success_rollouts",
             assets=AssetsConfig(
