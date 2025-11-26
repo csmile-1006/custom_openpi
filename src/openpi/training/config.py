@@ -1235,14 +1235,14 @@ _CONFIGS = [
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
-            peak_lr=5e-5,
-            decay_steps=30_000,
-            decay_lr=5e-5,
+            peak_lr=2.5e-5,
+            decay_steps=60_000,
+            decay_lr=2.5e-6,
         ),
-        num_train_steps=30_000,
+        num_train_steps=60_000,
         # pytorch_weight_path="/home/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_pytorch/30000",
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/home/ubuntu/data/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_jax/29999/params"
+            "/home/ubuntu/data/changyeon/ckpts/pi05_robocasa_100demos_base/pi05_robocasa_as50_jax/59999/params"
         ),
         batch_size=32,
         save_interval=10000,
