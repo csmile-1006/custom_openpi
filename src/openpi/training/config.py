@@ -1212,13 +1212,12 @@ _CONFIGS = [
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
-            peak_lr=5e-5,
-            decay_steps=30_000,
-            decay_lr=5e-5,
+            peak_lr=2.5e-5,
+            decay_steps=60_000,
+            decay_lr=2.5e-6,
         ),
-        num_train_steps=30_000,
-        # pytorch_weight_path="/home/changyeon/ckpts/changyeon/pi05_pytorch/",
-        batch_size=32,
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=60_000,
         save_interval=10000,
     ),
     TrainConfig(

@@ -1,3 +1,8 @@
+CONFIG_NAME=${1:-"pi05_robocasa_100demos_base"}
+EXP_NAME=${2:-"pi05_robocasa_as50_jax"}
+CKPT_STEP=${3:-29999}
+RANDOM_PORT=${4:-39281}
+
 HOME_DIR=$(pwd)
 BASE_DIR=/home/changyeon/workspace
 CONDA_PATH=/home/changyeon/miniconda3
@@ -13,20 +18,15 @@ unset LEROBOT_HOME
 
 
 
-CKPT_PATH="/home/changyeon/ckpts"
-CONFIG_NAME="pi05_robocasa_100demos_base"
-EXP_NAME="pi05_robocasa_as50_jax"
+CKPT_PATH="/home/ubuntu/data/changyeon/ckpts"
 
 POLICY_SEED=42
-CKPT_STEP=30000
 
 DEBUG=0   # 1 to return top-10 dists per step
 
 POLICY_DIRS=(
-    # "$CKPT_PATH/$CONFIG_NAME/$EXP_NAME/$CKPT_STEP"
+    "$CKPT_PATH/$CONFIG_NAME/$EXP_NAME/$CKPT_STEP"
 )
-
-RANDOM_PORT=39281
 
 echo "=== Configuration ==="
 echo "ENV_SEED: 42 "
