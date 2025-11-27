@@ -146,7 +146,7 @@ class ModelTransformFactory(GroupFactory):
                         _transforms.PadStatesAndActions(model_config.action_dim),
                     ],
                 )
-            case _model.ModelType.PI05_DEAS:
+            case _model.ModelType.PI0_DEAS:
                 assert isinstance(model_config, pi0_config.Pi0Config)
                 return _transforms.Group(
                     inputs=[
@@ -531,6 +531,7 @@ class LeRobotRobocasaRLDataConfig(DataConfigFactory):
                         "annotation.human.action.task_description": "prompt",
                         "reward": "next.reward",
                         "done": "next.done",
+                        "reward_pad": "next.reward_is_pad",
                     }
                 )
             ]
@@ -553,7 +554,12 @@ class LeRobotRobocasaRLDataConfig(DataConfigFactory):
             # NOTE : pi0-fast uses quantile norm (official paper) -> similar to min-max
             use_quantile_norm=model_config.model_type == ModelType.PI0_FAST,
             use_next_observation=True,
-            observation_keys=("video.left_view", "video.right_view", "video.wrist_view", "state"),
+            observation_keys=(
+                "observation.images.left_view",
+                "observation.images.right_view",
+                "observation.images.wrist_view",
+                "observation.state",
+            ),
             # NOTE : Lerobot Robocasa dataset has "action" key, not actions!
             action_sequence_keys=("action", "next.reward", "next.done"),
         )
@@ -1273,6 +1279,33 @@ _CONFIGS = [
             "/home/ubuntu/data/changyeon/ckpts/pi0_robocasa_100demos_base/pi0-robocasa-100demos-base/59999/params"
         ),
         batch_size=32,
+        save_interval=10000,
+    ),
+    TrainConfig(
+        name="pi0_robocasa_100demos_rl",
+        model=pi0_config.Pi0Config(deas=True, deas_config=pi0_config.DEASConfig()),
+        data=LeRobotRobocasaRLDataConfig(
+            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
+            assets=AssetsConfig(
+                assets_dir="/home/changyeon/data/assets",
+                asset_id="robocasa_lerobot_100demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+            ),
+        ),
+        lr_schedule=_optimizer.ConstantSchedule(
+            lr=1e-4,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=100.0),
+        num_train_steps=60_000,
+        weight_loader=weight_loaders.DEASCheckpointWeightLoader(
+            "/home/ubuntu/data/changyeon/ckpts/pi0_robocasa_100demos_base/pi0_robocasa_as50_jax/59999/params"
+        ),
+        freeze_filter=pi0_config.Pi0Config(deas=True).get_freeze_filter(),
+        num_workers=1,
+        batch_size=2,
         save_interval=10000,
     ),
     TrainConfig(

@@ -31,9 +31,9 @@ class ModelType(enum.Enum):
     """Supported model types."""
 
     PI0 = "pi0"
+    PI0_DEAS = "pi0_deas"
     PI0_FAST = "pi0_fast"
     PI05 = "pi05"
-    PI05_DEAS = "pi05_deas"
 
 
 # The model always expects these images
@@ -107,6 +107,15 @@ class Observation(Generic[ArrayT]):
     # Token loss mask (for FAST autoregressive model).
     token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
 
+    # RL Specific fields.
+    next_state: at.Float[ArrayT, "*b s"] | None = None
+    next_state_mask: at.Bool[ArrayT, "*b s"] | None = None
+    next_image: dict[str, at.Float[ArrayT, "*b h w c"]] | None = None
+    next_image_mask: dict[str, at.Bool[ArrayT, "*b"]] | None = None
+    reward: at.Float[ArrayT, "*b ah"] | None = None
+    reward_pad: at.Bool[ArrayT, "*b ah"] | None = None
+    done: at.Bool[ArrayT, "*b ah"] | None = None
+
     @classmethod
     def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
         """This method defines the mapping between unstructured data (i.e., nested dict) to the structured Observation format."""
@@ -119,10 +128,27 @@ class Observation(Generic[ArrayT]):
                 data["image"][key] = data["image"][key].astype(np.float32) / 255.0 * 2.0 - 1.0
             elif hasattr(data["image"][key], "dtype") and data["image"][key].dtype == torch.uint8:
                 data["image"][key] = data["image"][key].to(torch.float32).permute(0, 3, 1, 2) / 255.0 * 2.0 - 1.0
+
+        if "next_image" in data:
+            for key in data["next_image"]:
+                if data["next_image"][key].dtype == np.uint8:
+                    data["next_image"][key] = data["next_image"][key].astype(np.float32) / 255.0 * 2.0 - 1.0
+                elif hasattr(data["next_image"][key], "dtype") and data["next_image"][key].dtype == torch.uint8:
+                    data["next_image"][key] = (
+                        data["next_image"][key].to(torch.float32).permute(0, 3, 1, 2) / 255.0 * 2.0 - 1.0
+                    )
+
         return cls(
             images=data["image"],
             image_masks=data["image_mask"],
             state=data["state"],
+            next_state=data.get("next_state"),
+            next_state_mask=data.get("next_state_mask"),
+            next_image=data.get("next_image"),
+            next_image_mask=data.get("next_image_mask"),
+            reward=data.get("reward"),
+            done=data.get("done"),
+            reward_pad=data.get("reward_pad"),
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
@@ -198,6 +224,46 @@ def preprocess_observation(
         else:
             out_masks[key] = jnp.asarray(observation.image_masks[key])
 
+    if observation.next_image is not None:
+        out_next_images = {}
+        for key in image_keys:
+            image = observation.next_image[key]
+            if image.shape[1:3] != image_resolution:
+                logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
+                image = image_tools.resize_with_pad(image, *image_resolution)
+
+            if train:
+                # Convert from [-1, 1] to [0, 1] for augmax.
+                image = image / 2.0 + 0.5
+
+                transforms = []
+                if "wrist" not in key:
+                    height, width = image.shape[1:3]
+                    transforms += [
+                        augmax.RandomCrop(int(width * 0.95), int(height * 0.95)),
+                        augmax.Resize(width, height),
+                        augmax.Rotate((-5, 5)),
+                    ]
+                transforms += [
+                    augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
+                ]
+                sub_rngs = jax.random.split(rng, image.shape[0])
+                image = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
+
+                # Back to [-1, 1].
+                image = image * 2.0 - 1.0
+
+            out_next_images[key] = image
+
+        # obtain mask
+        out_next_masks = {}
+        for key in out_next_images:
+            if key not in observation.next_image_mask:
+                # do not mask by default
+                out_next_masks[key] = jnp.ones(batch_shape, dtype=jnp.bool)
+            else:
+                out_next_masks[key] = jnp.asarray(observation.next_image_mask[key])
+
     return Observation(
         images=out_images,
         image_masks=out_masks,
@@ -206,6 +272,13 @@ def preprocess_observation(
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
         token_ar_mask=observation.token_ar_mask,
         token_loss_mask=observation.token_loss_mask,
+        next_state=observation.next_state,
+        next_state_mask=observation.next_state_mask,
+        next_image=out_next_images,
+        next_image_mask=out_next_masks,
+        reward=observation.reward,
+        done=observation.done,
+        reward_pad=observation.reward_pad,
     )
 
 

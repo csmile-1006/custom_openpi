@@ -30,6 +30,15 @@ class CosineDecaySchedule(LRScheduleConfig):
             end_value=self.decay_lr,
         )
 
+@dataclasses.dataclass(frozen=True)
+class ConstantSchedule(LRScheduleConfig):
+    """Constant schedule."""
+
+    lr: float = 2.5e-5
+
+    def create(self) -> optax.Schedule:
+        return optax.constant_schedule(self.lr)
+
 
 @dataclasses.dataclass(frozen=True)
 class RsqrtDecaySchedule(LRScheduleConfig):

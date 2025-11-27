@@ -7,6 +7,8 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import override
 
+from openpi.models import deas_critic
+from openpi.models import hlg
 from openpi.models import model as _model
 from openpi.models import pi0_config
 import openpi.models.gemma as _gemma
@@ -66,7 +68,9 @@ def posemb_sincos(
 class Pi0(_model.BaseModel):
     def __init__(self, config: pi0_config.Pi0Config, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
+        self.config = config
         self.pi05 = config.pi05
+        self.deas = config.deas
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         # TODO: rewrite gemma in NNX. For now, use bridge.
@@ -97,6 +101,49 @@ class Pi0(_model.BaseModel):
             self.state_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
             self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+
+        if self.deas:
+            self.deas_config = self.config.deas_config
+            self.prefix_proj_deas = nnx.Linear(paligemma_config.width, self.deas_config.feature_dim, rngs=rngs)
+            self.value_deas = deas_critic.Value(
+                input_dim=self.deas_config.feature_dim + config.action_dim,
+                hidden_dims=self.deas_config.hidden_dim,
+                depth=4,
+                output_dim=self.deas_config.num_atoms,
+                rngs=rngs,
+            )
+            self.critic_deas = deas_critic.DoubleCritic(
+                input_dim=self.deas_config.feature_dim + (self.action_horizon + 1) * config.action_dim,
+                hidden_dims=[self.deas_config.hidden_dim] * 4,
+                output_dim=self.deas_config.num_atoms,
+                rngs=rngs,
+            )
+            # Initialize target critic with same structure, then copy parameters from main critic
+            self.target_critic_deas = deas_critic.DoubleCritic(
+                input_dim=self.deas_config.feature_dim + (self.action_horizon + 1) * config.action_dim,
+                hidden_dims=[self.deas_config.hidden_dim] * 4,
+                output_dim=self.deas_config.num_atoms,
+                rngs=rngs,
+            )
+            # Copy parameters from main critic to target critic
+            main_critic_state = nnx.state(self.critic_deas)
+            nnx.update(self.target_critic_deas, main_critic_state)
+
+            # compute v_min and v_max according to the discount factor
+            if self.deas_config.negative_reward:
+                v_min = -1 * (1 / (1 - self.deas_config.discount2))
+                v_max = 0.0
+            else:
+                v_min = 0.0
+                v_max = 1.0
+
+            self.hlg = hlg.HLGaussLoss(
+                min_value=v_min,
+                max_value=v_max,
+                num_bins=self.deas_config.num_atoms,
+                sigma=self.deas_config.sigma,
+            )
+
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
         # This attribute gets automatically set by model.train() and model.eval().
@@ -106,6 +153,9 @@ class Pi0(_model.BaseModel):
     def embed_prefix(
         self, obs: _model.Observation
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
+        if self.deas:
+            return self._compute_deas_prefix(obs)
+
         input_mask = []
         ar_mask = []
         tokens = []
@@ -185,12 +235,163 @@ class Pi0(_model.BaseModel):
         ar_mask = jnp.array(ar_mask)
         return tokens, input_mask, ar_mask, adarms_cond
 
+    @at.typecheck
+    def embed_deas_prefix(
+        self, obs: _model.Observation
+    ) -> tuple[at.Float[at.Array, "b emb"], at.Float[at.Array, "b emb"]]:
+        tokens, next_tokens = [], []
+        # embed images
+        for name in obs.images:
+            image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
+            tokens.append(image_tokens)
+
+        for name in obs.next_image:
+            next_image_tokens, _ = self.PaliGemma.img(obs.next_image[name], train=False)
+            next_tokens.append(next_image_tokens)
+
+        if obs.tokenized_prompt is not None:
+            tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
+            tokens.append(tokenized_inputs)
+            next_tokens.append(tokenized_inputs)
+        tokens = jnp.concatenate(tokens, axis=1).mean(axis=-2)
+        next_tokens = jnp.concatenate(next_tokens, axis=1).mean(axis=-2)
+
+        concat = jnp.stack([tokens, next_tokens], axis=1)  # shape: (b, 2, emb)
+        concat = self.prefix_proj_deas(concat)
+        concat = nnx.tanh(concat)
+        tokens, next_tokens = concat[:, 0], concat[:, 1]
+        return tokens, next_tokens
+
+    def update_target_critic(self) -> None:
+        """Update target critic using Polyak averaging.
+
+        This method performs a soft update of the target critic parameters using
+        the formula: target = tau * main + (1 - tau) * target
+        where tau is the Polyak coefficient from the DEAS config.
+        """
+        if not self.deas:
+            return
+
+        tau = self.deas_config.tau
+        main_state = nnx.state(self.critic_deas)
+        target_state = nnx.state(self.target_critic_deas)
+
+        # Apply Polyak update: target = tau * main + (1 - tau) * target
+        updated_target_state = jax.tree.map(
+            lambda main, target: tau * main + (1 - tau) * target,
+            main_state,
+            target_state,
+        )
+
+        # Update the target critic with the new state
+        nnx.update(self.target_critic_deas, updated_target_state)
+
+    def _value_deas_loss(
+        self,
+        prefix_tokens: at.Float[at.Array, "b emb"],
+        observation: _model.Observation,
+        actions: at.Float[at.Array, "b ah ad"],
+    ) -> at.Float[at.Array, "*b"]:
+        state = observation.state
+        v_logits = self.value_deas(prefix_tokens, state)
+        v_probs = jax.nn.softmax(v_logits, axis=-1)
+        vs = self.hlg.transform_from_probs(v_probs)
+
+        # Target critic returns (q1_logits, q2_logits), each shape (b, num_bins)
+        q1_logits, q2_logits = self.target_critic_deas(
+            prefix_tokens,  # VL embedding (b, emb)
+            state,  # (b, ad)
+            actions,  # (b, ah*ad)
+        )  # -> (b, num_bins), (b, num_bins)
+
+        # Stop gradient flow for target critic outputs and downstream computations
+        q1_logits = jax.lax.stop_gradient(q1_logits)
+        q2_logits = jax.lax.stop_gradient(q2_logits)
+
+        q_logits = jnp.stack([q1_logits, q2_logits], axis=0)  # (2, b, num_bins)
+        q_probs = jax.nn.softmax(q_logits, axis=-1)  # (2, b, num_bins)
+        qs = jax.lax.stop_gradient(self.hlg.transform_from_probs(q_probs))  # (2, b)
+
+        # Q aggregation logic
+        if self.deas_config.q_agg == "min":
+            min_q_idx = jnp.argmin(qs, axis=0)  # (b,)
+            batch_indices = jnp.arange(actions.shape[0])
+            # Select (b, num_bins) for each batch item from min_q_idx
+            q_logit = q_logits[min_q_idx, batch_indices]  # (b, num_bins)
+            q_prob = jax.nn.softmax(q_logit, axis=-1)  # (b, num_bins)
+            q = self.hlg.transform_from_probs(q_prob)  # (b,)
+        elif self.deas_config.q_agg == "mean":
+            q_logit = jnp.mean(q_logits, axis=0)  # (b, num_bins)
+            q_prob = jnp.mean(q_probs, axis=0)  # (b, num_bins)
+            q = self.hlg.transform_from_probs(q_prob)  # (b,)
+        else:
+            raise ValueError(f"Invalid q_agg: {self.deas_config.q_agg}")
+
+        # Expectile regression term
+        g_hard = jnp.where(q >= vs, self.deas_config.expectile, 1.0 - self.deas_config.expectile)  # (b,)
+
+        # Cross-entropy loss, using explicit log_softmax and jnp
+        log_probs = jax.nn.log_softmax(v_logits, axis=-1)  # (b, num_bins)
+        ce_loss = -jnp.sum(q_prob * log_probs, axis=-1)  # (b,)
+        return g_hard * ce_loss  # (b,)
+
+    def _deas_critic_loss(
+        self,
+        prefix_tokens: at.Float[at.Array, "b emb"],
+        next_prefix_tokens: at.Float[at.Array, "b emb"],
+        observation: _model.Observation,
+        actions: at.Float[at.Array, "b ah ad"],
+    ) -> at.Float[at.Array, "*b"]:
+        state = observation.state
+        done = observation.done
+        reward = observation.reward
+        if self.deas_config.negative_reward:
+            reward -= 1
+
+        discounts1 = self.deas_config.discount1 ** jnp.arange(self.deas_config.critic_action_horizon)
+        scaled_rewards = jnp.sum(reward * discounts1, axis=-1)
+        done = jnp.prod(done, axis=-1)
+
+        # Stop gradients on everything inside this block
+        v_logits = jax.lax.stop_gradient(self.value_deas(next_prefix_tokens, observation.next_state))
+        v_probs = jax.nn.softmax(v_logits, axis=-1)
+        vs = self.hlg.transform_from_probs(v_probs)
+
+        target_v = (
+            scaled_rewards
+            + (self.deas_config.discount2 ** (self.deas_config.nstep * self.deas_config.critic_action_horizon))
+            * (1.0 - done)
+            * vs
+        )
+        target_v = jax.lax.stop_gradient(target_v)
+
+        q1_logits, q2_logits = self.critic_deas(
+            prefix_tokens, state, actions[:, : self.deas_config.critic_action_horizon]
+        )
+        return (self.hlg(q1_logits, target_v) + self.hlg(q2_logits, target_v)) / 2
+
+    def _compute_deas_loss(
+        self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
+    ) -> at.Float[at.Array, "*b"]:
+        preprocess_rng, time_rng = jax.random.split(rng)
+        observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
+
+        prefix_tokens, next_prefix_tokens = self.embed_deas_prefix(observation)
+
+        value_loss = self._value_deas_loss(prefix_tokens, observation, actions)
+        critic_loss = self._deas_critic_loss(prefix_tokens, next_prefix_tokens, observation, actions)
+
+        return value_loss + critic_loss
+
     @override
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
-    ) -> at.Float[at.Array, "*b ah"]:
-        preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
+    ) -> at.Float[at.Array, "*b ah"] | at.Float[at.Array, "*b"]:
+        preprocess_rng, noise_rng, time_rng, deas_rng = jax.random.split(rng, 4)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
+
+        if self.deas:
+            return self._compute_deas_loss(deas_rng, observation, actions, train=train)
 
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)

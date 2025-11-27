@@ -2,6 +2,7 @@ import dataclasses
 
 import einops
 import numpy as np
+import torch
 
 from openpi import transforms
 from openpi.models import model as _model
@@ -101,29 +102,34 @@ class RobocasaRLInputs(transforms.DataTransformFn):
     offline_sampling: bool = False
 
     def __call__(self, data: dict) -> dict:
-        assert self.model_type == _model.ModelType.PI05_DEAS, "PI05_DEAS model only supports RL inputs"
+        assert self.model_type == _model.ModelType.PI0_DEAS, "PI0_DEAS model only supports RL inputs"
+        # for key, value in data.items():
+        #     if isinstance(value, torch.Tensor):
+        #         print(f"key: {key}, type: {type(value)}, shape: {value.shape}")
+        #     else:
+        #         print(f"key: {key}, type: {type(value)}, value: {value}")
         # state : torch.Size([batch_size, 2, 53]) -> split into (batch_size, 53) each
         # Split data["state"] with shape (batch_size, 2, 53) into state and next_state
-        state = data["state"][:, 0, :]  # shape: (batch_size, 53)
-        next_state = data["state"][:, 1, :]  # shape: (batch_size, 53)
+        state = data["state"][0]  # shape: (53)
+        next_state = data["state"][1]  # shape: (53)
 
-        state_base_pos = state[:, :3]
-        state_base_rot = state[:, 3:7]  # quaternion
-        state_end_eff_pos_rel = state[:, 10:13]
-        state_end_eff_rot_rel = state[:, 17:21]  # quaternion
-        state_gripper_qpos = state[:, 21:23]
+        state_base_pos = state[:3]
+        state_base_rot = state[3:7]  # quaternion
+        state_end_eff_pos_rel = state[10:13]
+        state_end_eff_rot_rel = state[17:21]  # quaternion
+        state_gripper_qpos = state[21:23]
 
         state = np.concatenate(
-            [state_base_pos, state_base_rot, state_end_eff_pos_rel, state_end_eff_rot_rel, state_gripper_qpos], axis=1
+            [state_base_pos, state_base_rot, state_end_eff_pos_rel, state_end_eff_rot_rel, state_gripper_qpos]
         )
         # since the robocasa action_dim = 12, which is < state_dim = 16, so pad is skipped.
         state = transforms.pad_to_dim(state, self.action_dim)
 
-        next_state_base_pos = next_state[:, :3]
-        next_state_base_rot = next_state[:, 3:7]  # quaternion
-        next_state_end_eff_pos_rel = next_state[:, 10:13]
-        next_state_end_eff_rot_rel = next_state[:, 17:21]  # quaternion
-        next_state_gripper_qpos = next_state[:, 21:23]
+        next_state_base_pos = next_state[:3]
+        next_state_base_rot = next_state[3:7]  # quaternion
+        next_state_end_eff_pos_rel = next_state[10:13]
+        next_state_end_eff_rot_rel = next_state[17:21]  # quaternion
+        next_state_gripper_qpos = next_state[21:23]
 
         next_state = np.concatenate(
             [
@@ -133,20 +139,20 @@ class RobocasaRLInputs(transforms.DataTransformFn):
                 next_state_end_eff_rot_rel,
                 next_state_gripper_qpos,
             ],
-            axis=1,
+            axis=0,
         )
         next_state = transforms.pad_to_dim(next_state, self.action_dim)
 
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
         # stores as float32 (C,H,W), gets skipped for policy inference
 
-        left_image = _parse_image(data["video.left_view"][:, 0, :])
-        right_image = _parse_image(data["video.right_view"][:, 0, :])
-        wrist_image = _parse_image(data["video.wrist_view"][:, 0, :])
+        left_image = _parse_image(data["video.left_view"][0])
+        right_image = _parse_image(data["video.right_view"][0])
+        wrist_image = _parse_image(data["video.wrist_view"][0])
 
-        next_left_image = _parse_image(data["video.left_view"][:, 1, :])
-        next_right_image = _parse_image(data["video.right_view"][:, 1, :])
-        next_wrist_image = _parse_image(data["video.wrist_view"][:, 1, :])
+        next_left_image = _parse_image(data["video.left_view"][1])
+        next_right_image = _parse_image(data["video.right_view"][1])
+        next_wrist_image = _parse_image(data["video.wrist_view"][1])
 
         # NOTE : ordered from left arm to right arm
         names = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
@@ -157,6 +163,7 @@ class RobocasaRLInputs(transforms.DataTransformFn):
 
         inputs = {
             "state": state,
+            "next_state": next_state,
             "image": dict(zip(names, images, strict=True)),
             "image_mask": dict(zip(names, image_masks, strict=True)),
             "next_image": dict(zip(names, next_images, strict=True)),
@@ -168,6 +175,13 @@ class RobocasaRLInputs(transforms.DataTransformFn):
 
         if "reward" in data:
             inputs["reward"] = data["reward"]
+            if torch.sum(inputs["reward"]) > 0:
+                reward_range = 15
+                idx = torch.where(inputs["reward"] == 1)[0]
+                if len(idx) > 0 and idx[0] - reward_range >= 0:
+                    start = idx[0] - reward_range
+                    inputs["reward"][start : idx[0]] = 1
+            inputs["reward_pad"] = data["reward_pad"]
         if "done" in data:
             inputs["done"] = data["done"]
 

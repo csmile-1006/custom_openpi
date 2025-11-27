@@ -2,6 +2,7 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 import flax.nnx as nnx
+import flax.struct as struct
 import jax
 import jax.numpy as jnp
 from typing_extensions import override
@@ -13,6 +14,29 @@ import openpi.shared.nnx_utils as nnx_utils
 
 if TYPE_CHECKING:
     from openpi.models.pi0 import Pi0
+
+
+@struct.dataclass
+class DEASConfig:
+    """Configuration for DEAS."""
+
+    critic_action_horizon: int = 50
+    q_agg: str = "min"
+    discount1: float = 0.9
+    discount2: float = 0.999
+    negative_reward: bool = True
+    nstep: int = 1
+    tau: float = 0.005
+
+    feature_dim: int = 64
+    hidden_dim: int = 1024
+
+    num_atoms: int = 101
+    sigma: float = 0.1
+    expectile: float = 0.7
+    support_type: str = "geometric"
+
+    num_samples: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -32,6 +56,7 @@ class Pi0Config(_model.BaseModelConfig):
 
     # Optionize DEAS model
     deas: bool = False
+    deas_config: DEASConfig = None
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
 
@@ -45,9 +70,9 @@ class Pi0Config(_model.BaseModelConfig):
     @override
     def model_type(self) -> _model.ModelType:
         if self.pi05:
-            if self.deas:
-                return _model.ModelType.PI05_DEAS
             return _model.ModelType.PI05
+        if self.deas:
+            return _model.ModelType.PI0_DEAS
         return _model.ModelType.PI0
 
     @override
@@ -110,4 +135,13 @@ class Pi0Config(_model.BaseModelConfig):
             )
         if not filters:
             return nnx.Nothing
+
+        if self.deas:
+            # If DEAS is enabled, freeze parameters whose path contains "target_critic_deas" or does NOT contain "deas".
+            filters.append(
+                nnx.Any(
+                    nnx_utils.PathRegex(".*target_critic_deas.*"),
+                    nnx.Not(nnx_utils.PathRegex(".*deas.*")),
+                )
+            )
         return nnx.All(*filters)

@@ -163,6 +163,8 @@ def train_step(
 
     # Update the model in place and return the new full state.
     nnx.update(model, new_params)
+    if config.model.deas:
+        model.update_target_critic()
     new_params = nnx.state(model)
 
     new_state = dataclasses.replace(state, step=state.step + 1, params=new_params, opt_state=new_opt_state)
