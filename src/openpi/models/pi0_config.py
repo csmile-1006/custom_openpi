@@ -23,7 +23,7 @@ class DEASConfig:
     critic_action_horizon: int = 50
     q_agg: str = "min"
     discount1: float = 0.9
-    discount2: float = 0.999
+    discount2: float = 0.995
     negative_reward: bool = True
     nstep: int = 1
     tau: float = 0.005
@@ -36,7 +36,8 @@ class DEASConfig:
     expectile: float = 0.7
     support_type: str = "geometric"
 
-    num_samples: int = 1
+    num_samples: int = 10
+    temperature: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)

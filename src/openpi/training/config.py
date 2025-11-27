@@ -1304,8 +1304,7 @@ _CONFIGS = [
             "/home/ubuntu/data/changyeon/ckpts/pi0_robocasa_100demos_base/pi0_robocasa_as50_jax/59999/params"
         ),
         freeze_filter=pi0_config.Pi0Config(deas=True).get_freeze_filter(),
-        num_workers=1,
-        batch_size=2,
+        batch_size=128,
         save_interval=10000,
     ),
     TrainConfig(
