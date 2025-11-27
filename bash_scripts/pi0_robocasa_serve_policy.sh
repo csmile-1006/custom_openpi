@@ -7,7 +7,7 @@ HOME_DIR=$(pwd)
 BASE_DIR=/home/changyeon/workspace
 CONDA_PATH=/home/changyeon/miniconda3
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.4
 export XLA_FLAGS="--xla_gpu_deterministic_ops=true" #NOTE : 재현성 위해 무조건 필요!
 
 # export XLA_PYTHON_CLIENT_PREALLOCATE=false
