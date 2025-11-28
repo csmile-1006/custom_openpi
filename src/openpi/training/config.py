@@ -1285,7 +1285,7 @@ _CONFIGS = [
         name="pi0_robocasa_100demos_rl",
         model=pi0_config.Pi0Config(deas=True, deas_config=pi0_config.DEASConfig()),
         data=LeRobotRobocasaRLDataConfig(
-            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
+            repo_id="changyeon/deas_robocasa_demo_rollouts",
             assets=AssetsConfig(
                 assets_dir="/home/changyeon/data/assets",
                 asset_id="robocasa_lerobot_100demos_pi0",
@@ -1311,7 +1311,7 @@ _CONFIGS = [
         name="pi0_robocasa_100demos_rl_debug",
         model=pi0_config.Pi0Config(deas=True, deas_config=pi0_config.DEASConfig()),
         data=LeRobotRobocasaRLDataConfig(
-            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
+            repo_id="changyeon/deas_robocasa_demo_rollouts",
             assets=AssetsConfig(
                 assets_dir="/home/changyeon/data/assets",
                 asset_id="robocasa_lerobot_100demos_pi0",
