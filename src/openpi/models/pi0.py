@@ -149,6 +149,18 @@ class Pi0(_model.BaseModel):
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
 
+    def _compute_deas_prefix(
+        self, obs: _model.Observation
+    ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
+        """Compute prefix for DEAS mode, returning tokens in the same format as embed_prefix."""
+        prefix_tokens, _ = self.embed_deas_prefix(obs)
+        # Convert (b, emb) to (b, 1, emb) to match expected format
+        batch_size = prefix_tokens.shape[0]
+        prefix_tokens = prefix_tokens[:, None, :]  # (b, 1, emb)
+        prefix_mask = jnp.ones((batch_size, 1), dtype=jnp.bool_)  # (b, 1)
+        prefix_ar_mask = jnp.array([False])  # (1,)
+        return prefix_tokens, prefix_mask, prefix_ar_mask
+
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
@@ -414,6 +426,110 @@ class Pi0(_model.BaseModel):
 
         return jnp.mean(jnp.square(v_t - u_t), axis=-1)
 
+    def sample_actions_deas(
+        self,
+        rng: at.KeyArrayLike,
+        observation: _model.Observation,
+        noise: at.Float[at.Array, "b ah ad"] | None = None,
+        num_steps: int | at.Int[at.Array, ""] = 10,
+    ) -> _model.Actions:
+        dt = -1.0 / num_steps
+        batch_size = observation.state.shape[0]
+        num_samples = self.deas_config.num_samples
+
+        if noise is None:
+            noise = jax.random.normal(rng, (batch_size * num_samples, self.action_horizon, self.action_dim))
+
+        # Get prefix tokens for the original batch
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        # Repeat prefix for each sample: (b, s, emb) -> (b*n, s, emb)
+        prefix_tokens_expanded = einops.repeat(prefix_tokens, "b s emb -> (b n) s emb", n=num_samples)
+        prefix_mask_expanded = einops.repeat(prefix_mask, "b s -> (b n) s", n=num_samples)
+        prefix_ar_mask_expanded = jnp.broadcast_to(
+            prefix_ar_mask[None, :], (batch_size * num_samples, prefix_ar_mask.shape[0])
+        )
+        prefix_attn_mask = make_attn_mask(prefix_mask_expanded, prefix_ar_mask_expanded)
+        positions = jnp.cumsum(prefix_mask_expanded, axis=1) - 1
+        _, kv_cache = self.PaliGemma.llm([prefix_tokens_expanded, None], mask=prefix_attn_mask, positions=positions)
+
+        # Expand all fields of the observation for num_samples using einops.repeat for broadcasting.
+        def repeat_field(field, pattern):
+            return einops.repeat(field, pattern, n=num_samples) if field is not None else None
+
+        def repeat_dict(d, pattern):
+            return {k: einops.repeat(v, pattern, n=num_samples) for k, v in d.items()} if d is not None else None
+
+        expanded_observation = _model.Observation(
+            state=repeat_field(observation.state, "b ad -> (b n) ad"),
+            images=repeat_dict(observation.images, "b ... -> (b n) ..."),
+            image_masks=repeat_dict(observation.image_masks, "b ... -> (b n) ..."),
+            tokenized_prompt=repeat_field(observation.tokenized_prompt, "b s -> (b n) s"),
+            tokenized_prompt_mask=repeat_field(observation.tokenized_prompt_mask, "b s -> (b n) s"),
+            next_state=repeat_field(observation.next_state, "b ad -> (b n) ad"),
+            next_state_mask=repeat_field(observation.next_state_mask, "b ad -> (b n) ad"),
+            next_image=repeat_dict(observation.next_image, "b ... -> (b n) ..."),
+            next_image_mask=repeat_dict(observation.next_image_mask, "b ... -> (b n) ..."),
+            done=repeat_field(observation.done, "b ... -> (b n) ..."),
+            reward=repeat_field(observation.reward, "b ... -> (b n) ..."),
+            reward_pad=repeat_field(observation.reward_pad, "b ... -> (b n) ..."),
+            token_ar_mask=repeat_field(observation.token_ar_mask, "b s -> (b n) s"),
+            token_loss_mask=repeat_field(observation.token_loss_mask, "b s -> (b n) s"),
+        )
+
+        def step(carry):
+            x_t, time = carry
+            suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                expanded_observation, x_t, jnp.broadcast_to(time, batch_size * num_samples)
+            )
+            suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+            full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
+            positions = jnp.sum(prefix_mask_expanded, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+            (prefix_out, suffix_out), _ = self.PaliGemma.llm(
+                [None, suffix_tokens],
+                mask=full_attn_mask,
+                positions=positions,
+                kv_cache=kv_cache,
+                adarms_cond=[None, adarms_cond],
+            )
+            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+            return x_t + dt * v_t, time + dt
+
+        def cond(carry):
+            x_t, time = carry
+            return time >= -dt / 2
+
+        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+        x_0 = x_0.reshape(batch_size, num_samples, self.action_horizon, self.action_dim)
+
+        # Compute critic prefix tokens from original (non-expanded) prefix
+        # Average over sequence dimension to get (b, emb)
+        critic_prefix_tokens = jnp.mean(prefix_tokens, axis=1)  # (b, emb)
+        critic_prefix_tokens = self.prefix_proj_deas(critic_prefix_tokens[:, None, :])  # (b, 1, emb)
+        critic_prefix_tokens = nnx.tanh(critic_prefix_tokens)
+        critic_prefix_tokens = critic_prefix_tokens[:, 0, :]  # (b, emb)
+        # Repeat for each sample: (b, emb) -> (b*n, emb)
+        critic_prefix_tokens = einops.repeat(critic_prefix_tokens, "b emb -> (b n) emb", n=num_samples)
+
+        # Expand states for num_samples
+        critic_states = einops.repeat(observation.state, "b ad -> (b n) ad", n=num_samples)
+        critic_actions = x_0.reshape(batch_size * num_samples, self.action_horizon, self.action_dim)
+        q1_logits, q2_logits = self.critic_deas(
+            critic_prefix_tokens, critic_states, critic_actions[:, : self.deas_config.critic_action_horizon]
+        )
+        q1_probs = jax.nn.softmax(q1_logits, axis=-1)
+        q2_probs = jax.nn.softmax(q2_logits, axis=-1)
+        q1_values = self.hlg.transform_from_probs(q1_probs)
+        q2_values = self.hlg.transform_from_probs(q2_probs)
+        q_values = jnp.stack([q1_values, q2_values], axis=0)
+        q_values = jnp.mean(q_values, axis=0)  # (b*n,)
+        q_values = q_values.reshape(batch_size, num_samples)  # (b, n)
+
+        # Choose the action with the highest q-value
+        chosen_indices = jnp.argmax(q_values, axis=-1)  # (b,)
+        # Select the chosen actions: (b, n, ah, ad) -> (b, ah, ad)
+        batch_indices = jnp.arange(batch_size)
+        return x_0[batch_indices, chosen_indices]  # (b, ah, ad)
+
     @override
     def sample_actions(
         self,
@@ -424,6 +540,8 @@ class Pi0(_model.BaseModel):
         noise: at.Float[at.Array, "b ah ad"] | None = None,
     ) -> _model.Actions:
         observation = _model.preprocess_observation(None, observation, train=False)
+        if self.deas:
+            return self.sample_actions_deas(rng, observation, noise, num_steps)
         # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
         # distribution. yes, this is the opposite of the pi0 paper, and I'm sorry.
         dt = -1.0 / num_steps
