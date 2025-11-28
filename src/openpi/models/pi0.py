@@ -165,9 +165,6 @@ class Pi0(_model.BaseModel):
     def embed_prefix(
         self, obs: _model.Observation
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
-        if self.deas:
-            return self._compute_deas_prefix(obs)
-
         input_mask = []
         ar_mask = []
         tokens = []
@@ -445,10 +442,7 @@ class Pi0(_model.BaseModel):
         # Repeat prefix for each sample: (b, s, emb) -> (b*n, s, emb)
         prefix_tokens_expanded = einops.repeat(prefix_tokens, "b s emb -> (b n) s emb", n=num_samples)
         prefix_mask_expanded = einops.repeat(prefix_mask, "b s -> (b n) s", n=num_samples)
-        prefix_ar_mask_expanded = jnp.broadcast_to(
-            prefix_ar_mask[None, :], (batch_size * num_samples, prefix_ar_mask.shape[0])
-        )
-        prefix_attn_mask = make_attn_mask(prefix_mask_expanded, prefix_ar_mask_expanded)
+        prefix_attn_mask = make_attn_mask(prefix_mask_expanded, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask_expanded, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens_expanded, None], mask=prefix_attn_mask, positions=positions)
 
@@ -484,6 +478,7 @@ class Pi0(_model.BaseModel):
                 expanded_observation, x_t, jnp.broadcast_to(time, batch_size * num_samples)
             )
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+            prefix_attn_mask = einops.repeat(prefix_mask_expanded, "b p -> b s p", s=suffix_tokens.shape[1])
             full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
             positions = jnp.sum(prefix_mask_expanded, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
             (prefix_out, suffix_out), _ = self.PaliGemma.llm(

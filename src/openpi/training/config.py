@@ -1308,6 +1308,33 @@ _CONFIGS = [
         save_interval=10000,
     ),
     TrainConfig(
+        name="pi0_robocasa_100demos_rl_debug",
+        model=pi0_config.Pi0Config(deas=True, deas_config=pi0_config.DEASConfig()),
+        data=LeRobotRobocasaRLDataConfig(
+            repo_id="changyeon/deas_robocasa_demo_success_rollouts",
+            assets=AssetsConfig(
+                assets_dir="/home/changyeon/data/assets",
+                asset_id="robocasa_lerobot_100demos_pi0",
+            ),
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+            ),
+        ),
+        lr_schedule=_optimizer.ConstantSchedule(
+            lr=1e-4,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=100.0),
+        num_train_steps=10,
+        weight_loader=weight_loaders.DEASCheckpointWeightLoader(
+            "/home/ubuntu/data/changyeon/ckpts/pi0_robocasa_100demos_base/pi0_robocasa_as50_jax/59999/params"
+        ),
+        freeze_filter=pi0_config.Pi0Config(deas=True).get_freeze_filter(),
+        batch_size=4,
+        num_workers=1,
+        save_interval=10000,
+    ),
+    TrainConfig(
         name="pi0_robocasa_300demos_base",
         model=pi0_config.Pi0Config(),
         data=LeRobotRobocasaDataConfig(

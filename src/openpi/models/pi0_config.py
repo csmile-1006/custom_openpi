@@ -134,9 +134,6 @@ class Pi0Config(_model.BaseModelConfig):
             filters.append(
                 nnx.Not(nnx_utils.PathRegex(".*lora.*")),
             )
-        if not filters:
-            return nnx.Nothing
-
         if self.deas:
             # If DEAS is enabled, freeze parameters whose path contains "target_critic_deas" or does NOT contain "deas".
             filters.append(
@@ -145,4 +142,6 @@ class Pi0Config(_model.BaseModelConfig):
                     nnx.Not(nnx_utils.PathRegex(".*deas.*")),
                 )
             )
+        if not filters:
+            return nnx.Nothing
         return nnx.All(*filters)

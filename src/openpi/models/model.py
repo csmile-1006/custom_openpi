@@ -224,8 +224,9 @@ def preprocess_observation(
         else:
             out_masks[key] = jnp.asarray(observation.image_masks[key])
 
+    out_next_images = {}
+    out_next_masks = {}
     if observation.next_image is not None:
-        out_next_images = {}
         for key in image_keys:
             image = observation.next_image[key]
             if image.shape[1:3] != image_resolution:
@@ -256,7 +257,6 @@ def preprocess_observation(
             out_next_images[key] = image
 
         # obtain mask
-        out_next_masks = {}
         for key in out_next_images:
             if key not in observation.next_image_mask:
                 # do not mask by default
