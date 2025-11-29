@@ -7,6 +7,7 @@ CKPT_PATH="/home/ubuntu/data/changyeon/ckpts"
 CONFIG_NAME=${1:-"pi05_robocasa_100demos_base"}
 EXP_NAME=${2:-"pi05_robocasa_as50_jax"}
 RANDOM_PORT=${3:-39281}
+N_EPISODES=${4:-50}
 
 CKPT_STEPS=(
   "59999"
@@ -108,7 +109,7 @@ for CKPT_STEP in "${CKPT_STEPS[@]}"; do
           --args.seed=$SEED \
           --args.env_name \"$TASK_NAME\" \
           --args.video-dir \"$OUTPUT_DIR\" \
-          --args.n-episodes=1 \
+          --args.n-episodes=${N_EPISODES} \
           --args.generative_textures"
 
       echo "Starting evaluation with command:"
