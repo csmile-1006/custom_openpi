@@ -6,8 +6,7 @@ CKPT_PATH="/home/ubuntu/data/changyeon/ckpts"
 
 CONFIG_NAME=${1:-"pi05_robocasa_100demos_base"}
 EXP_NAME=${2:-"pi05_robocasa_as50_jax"}
-CKPT_STEP=${3:-29999}
-RANDOM_PORT=${4:-39281}
+RANDOM_PORT=${3:-39281}
 
 CKPT_STEPS=(
   "59999"
