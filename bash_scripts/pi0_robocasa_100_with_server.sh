@@ -83,13 +83,13 @@ for CKPT_STEP in "${CKPT_STEPS[@]}"; do
 
   SEEDS=(
     "0"
-  #   "42"
-  #   "123"
+    "42"
+    "123"
   )
 
   TASK_NAMES=(
-  #   "TurnOffStove"
-  #   "PnPMicrowaveToCounter"
+    "TurnOffStove"
+    "PnPMicrowaveToCounter"
     "PnPCounterToMicrowave"
     "CoffeeSetupMug"
   ) # 24 tasks in total
