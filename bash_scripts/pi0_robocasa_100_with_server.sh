@@ -8,6 +8,7 @@ CONFIG_NAME=${1:-"pi05_robocasa_100demos_base"}
 EXP_NAME=${2:-"pi05_robocasa_as50_jax"}
 RANDOM_PORT=${3:-39281}
 N_EPISODES=${4:-50}
+ACTION_HORIZON=${5:-50}
 
 CKPT_STEPS=(
   "59999"
@@ -99,7 +100,7 @@ for CKPT_STEP in "${CKPT_STEPS[@]}"; do
     for SEED_ID in "${!SEEDS[@]}"; do
       TASK_NAME="${TASK_NAMES[$TASK_ID]}"
       SEED=${SEEDS[$SEED_ID]}
-      OUTPUT_DIR="$SAVE_DIR/output/openpi/robocasa_100/$CONFIG_NAME/$EXP_NAME/$CKPT_STEP/$TASK_NAME-seed$SEED"
+      OUTPUT_DIR="$SAVE_DIR/output/openpi/robocasa_100/$CONFIG_NAME/$EXP_NAME_eval${ACTION_HORIZON}/$CKPT_STEP/$TASK_NAME-seed$SEED"
       mkdir -p "$OUTPUT_DIR"
 
       echo "POLICY : ${POLICY_DIRS[@]}  | TASK_NAME: ${TASK_NAME} | SEED: ${SEED} | PORT: ${RANDOM_PORT}"
@@ -110,6 +111,7 @@ for CKPT_STEP in "${CKPT_STEPS[@]}"; do
           --args.env_name \"$TASK_NAME\" \
           --args.video-dir \"$OUTPUT_DIR\" \
           --args.n-episodes=${N_EPISODES} \
+          --args.action-horizon=${ACTION_HORIZON} \
           --args.generative_textures"
 
       echo "Starting evaluation with command:"

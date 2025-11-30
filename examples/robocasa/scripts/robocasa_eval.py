@@ -96,6 +96,7 @@ class Args:
     video_dir: str = "/virtual_lab/sjw_alinlab/suhyeok/openpi/output/robocasa/videos"
     n_episodes: int = 50
     max_episode_steps: int = 750
+    action_horizon: int = 50
 
     # Robocasa env parameters
     controller: str | None = (
@@ -125,7 +126,7 @@ def eval_robocasa(args: Args) -> None:
 
     # Load Model from Server
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
-    action_horizon = 50
+    action_horizon = args.action_horizon
     # available_policies = client.get_available_policies()
     # action_horizon = client.get_action_horizon()
     # logging.info(f"Available policies: {available_policies}")
