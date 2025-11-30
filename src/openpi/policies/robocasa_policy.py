@@ -28,8 +28,6 @@ class RobocasaInputs(transforms.DataTransformFn):
     offline_sampling: bool = False
 
     def __call__(self, data: dict) -> dict:
-        print(f"data['state']: {data['state']}")
-        raise Exception("stop")
         # state : torch.Size([53]) -> [16] = (D)
         state_base_pos = data["state"][:3]
         state_base_rot = data["state"][3:7]  # quaternion
